@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#070c0d">
+<title>EMBER RUN — беги, бей, парируй</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="960" height="540" aria-label="Игра Ember Run"></canvas>
+  <div class="fx-scanlines" aria-hidden="true"></div>
+  <div class="fx-vignette" aria-hidden="true"></div>
+
+  <div id="hud" class="hidden" aria-hidden="true">
+    <div class="level-strip"><div id="levelFill"></div></div>
+    <div class="top-hud">
+      <div class="hud-left">
+        <div id="hearts" class="hearts"></div>
+        <div class="level-tag">
+          <span id="levelNum">1</span>
+          <small>УРОВЕНЬ</small>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div id="score" class="score">0</div>
+        <div class="score-label">ОЧКИ</div>
+        <div id="combo" class="combo">
+          <span id="comboMult">×1</span> КОМБО
+          <div class="combo-bar"><i id="comboFill"></i></div>
+        </div>
+      </div>
+      <div class="hud-right">
+        <div class="dist"><span id="dist">0</span> м</div>
+        <div class="best"><span>РЕКОРД</span> <b id="best">0</b></div>
+        <div class="hud-btns">
+          <button id="btnSound" class="icon-btn" type="button" aria-label="Звук" title="Звук (M)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="snd-on" d="M4 9h4l5-4v14l-5-4H4z"/><path class="snd-on" d="M16 8.5a5 5 0 0 1 0 7"/><path class="snd-on" d="M18.7 6a8.5 8.5 0 0 1 0 12"/><path class="snd-off" d="M4 9h4l5-4v14l-5-4H4z"/><path class="snd-off" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+          </button>
+          <button id="btnPause" class="icon-btn" type="button" aria-label="Пауза" title="Пауза (P)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="perkList" class="perk-list"></div>
+    <div id="banner" class="banner"><b></b><span></span></div>
+    <div id="toast" class="toast"><b></b><span></span></div>
+    <div id="hint" class="hint"></div>
+  </div>
+
+  <div id="startScreen" class="screen">
+    <div class="menu-wrap">
+      <div class="eyebrow">ЛЕС НЕ КОНЧАЕТСЯ</div>
+      <h1 class="logo"><span class="logo-ember">EMBER</span><span class="logo-run">RUN</span></h1>
+      <p class="tagline">Беги. Бей. Парируй.</p>
+
+      <div class="menu-cols">
+        <div class="controls-grid">
+          <div class="ctrl">
+            <kbd>ПРОБЕЛ</kbd>
+            <b>Прыжок</b>
+            <small>держи дольше — выше</small>
+          </div>
+          <div class="ctrl">
+            <kbd>J / X</kbd>
+            <b>Удар</b>
+            <small>руби врагов</small>
+          </div>
+          <div class="ctrl">
+            <kbd>K / C</kbd>
+            <b>Парирование</b>
+            <small>отражай снаряды</small>
+          </div>
+          <div class="ctrl">
+            <kbd>P / ESC</kbd>
+            <b>Пауза</b>
+            <small>M — звук</small>
+          </div>
+        </div>
+        <div class="perks-note">
+          <div class="perks-note-title">Редкие дары леса</div>
+          <ul>
+            <li><i class="dot c-cyan"></i>Щит — поглощает урон</li>
+            <li><i class="dot c-pink"></i>Магнит — притягивает искры</li>
+            <li><i class="dot c-blue"></i>Хронос — замедляет мир</li>
+            <li><i class="dot c-gold"></i>Двойной прыжок</li>
+            <li><i class="dot c-red"></i>Лечение и ярость</li>
+          </ul>
+          <p>Чем дальше бежишь — тем злее лес: больше врагов, шипов и снарядов.</p>
+        </div>
+      </div>
+
+      <button id="btnStart" class="btn primary" type="button" disabled>
+        <span class="btn-label">ЗАГРУЗКА…</span><span class="btn-arrow">→</span>
+      </button>
+      <div class="menu-foot">Рекорд <b id="menuBest">0</b><span class="sep">·</span><span id="menuBestDist">0 м</span></div>
+    </div>
+  </div>
+
+  <div id="pauseScreen" class="screen hidden">
+    <div class="panel small-panel">
+      <div class="eyebrow">ПЕРЕДЫШКА</div>
+      <h2 class="screen-title">ПАУЗА</h2>
+      <div class="pause-stats"><span>Очки</span><b id="pauseScore">0</b></div>
+      <div class="btn-row">
+        <button id="btnResume" class="btn primary" type="button"><span class="btn-label">ПРОДОЛЖИТЬ</span></button>
+        <button id="btnPauseRestart" class="btn ghost" type="button">ЗАНОВО</button>
+        <button id="btnPauseMenu" class="btn ghost" type="button">В МЕНЮ</button>
+      </div>
+      <p class="fineprint">P / ESC — продолжить · M — звук</p>
+    </div>
+  </div>
+
+  <div id="gameoverScreen" class="screen hidden">
+    <div class="panel over-panel">
+      <div class="eyebrow danger">ЗАБЕГ ОКОНЧЕН</div>
+      <h2 class="screen-title">ТЬМА ПОБЕДИЛА</h2>
+      <div class="final-score-wrap">
+        <div id="newRecord" class="new-record hidden">НОВЫЙ РЕКОРД</div>
+        <div id="finalScore" class="final-score">0</div>
+        <div class="final-label">ОЧКОВ</div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat"><span>Дистанция</span><b id="statDist">0 м</b></div>
+        <div class="stat"><span>Врагов повержено</span><b id="statKills">0</b></div>
+        <div class="stat"><span>Парировано</span><b id="statParry">0</b></div>
+        <div class="stat"><span>Лучшее комбо</span><b id="statCombo">×1</b></div>
+        <div class="stat"><span>Сложность</span><b id="statLevel">1</b></div>
+        <div class="stat"><span>Искр собрано</span><b id="statEmbers">0</b></div>
+      </div>
+      <div class="btn-row">
+        <button id="btnRestart" class="btn primary" type="button"><span class="btn-label">ЕЩЁ РАЗ</span><span class="btn-arrow">↻</span></button>
+        <button id="btnMenu" class="btn ghost" type="button">В МЕНЮ</button>
+      </div>
+      <p class="fineprint">R или ПРОБЕЛ — начать заново</p>
+    </div>
+  </div>
+
+  <div id="touch" class="touch hidden" aria-hidden="true">
+    <button class="tbtn attack" type="button" data-act="attack"><span>УДАР</span></button>
+    <button class="tbtn parry" type="button" data-act="parry"><span>ПАРИР</span></button>
+    <button class="tbtn jump" type="button" data-act="jump"><span>ПРЫЖОК</span></button>
+  </div>
+
+  <div id="rotate" class="rotate" aria-hidden="true">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="21" y="7" width="22" height="42" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+      <line x1="28" y1="44" x2="36" y2="44" stroke="currentColor" stroke-width="3"/>
+      <path d="M9 30a23 23 0 0 0 9 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <path d="M9 30l-1-8M9 30l8-2" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <path d="M55 34a23 23 0 0 1-9 14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <path d="M55 34l1-8M55 34l-8-2" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <b>ПОВЕРНИ УСТРОЙСТВО</b>
+    <span>Игра идёт в горизонтальном режиме</span>
+  </div>
+</div>
+
+<script src="js/audio.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
