@@ -264,6 +264,7 @@
       flipT: 0,
       flipDir: 1,
       trailT: 0,
+      dustT: 0,
       deathRot: 0,
       deathVY: 0,
       dead: false,
@@ -866,6 +867,10 @@
       { w: lv >= 3 ? 7 : 0, fn: patBatPair, name: "batPair" },
       { w: lv >= 4 ? 6 : 0, fn: patBatLow, name: "batLow" },
       { w: lv >= 4 ? 6 : 0, fn: patBatSpike, name: "batSpike" },
+      { w: lv >= 4 ? 7 : 0, fn: patCharger, name: "charger" },
+      { w: lv >= 6 ? 6 : 0, fn: patChargerSpike, name: "chargerSpike" },
+      { w: lv >= 5 ? 7 : 0, fn: patSpitter, name: "spitter" },
+      { w: lv >= 8 ? 5 : 0, fn: patSpitterBat, name: "spitterBat" },
       { w: lv >= 3 ? 8 : 0, fn: patSaw, name: "saw" },
       { w: lv >= 5 ? 6 : 0, fn: patSawPendulum, name: "sawPend" },
       { w: lv >= 7 ? 5 : 0, fn: patSawPair, name: "sawPair" },
@@ -982,6 +987,36 @@
     });
   }
 
+  function addCharger(x) {
+    G.objects.push({
+      kind: "charger",
+      x,
+      y: GROUND + 2,
+      state: "run",
+      timer: 0,
+      phase: rand(0, 6),
+      seed: rand(0, 10),
+      near: false,
+      passed: false,
+      dead: false,
+    });
+  }
+
+  function addSpitter(x, y) {
+    G.objects.push({
+      kind: "spitter",
+      x,
+      y,
+      baseY: y,
+      phase: rand(0, 6),
+      seed: rand(0, 10),
+      fireCd: rand(1.0, 1.9),
+      near: false,
+      passed: false,
+      dead: false,
+    });
+  }
+
   function addSaw(x, baseY, amp) {
     G.objects.push({
       kind: "saw",
@@ -1057,28 +1092,55 @@
     }
   }
 
-  function addProjectile(x, y, vx, vy, fromBat) {
+  function addProjectile(x, y, vx, vy, fromBat, opts) {
     if (G.projectiles.length > 11) return;
+    const acid = !!(opts && opts.acid);
     G.projectiles.push({
       x,
       y,
       vx,
       vy,
-      r: 9,
+      r: acid ? 10 : 9,
       life: 6,
       phase: rand(0, 6),
       reflected: false,
       fromBat: !!fromBat,
+      acid,
+      grav: (opts && opts.grav) || 0,
       trailT: 0,
       dead: false,
     });
     burst(x, y, {
       count: 4,
-      color: "#ff4d4d",
+      color: acid ? "#8bff9e" : "#ff4d4d",
       speed: 90,
       life: 0.3,
       size: 2,
       type: "spark",
+    });
+  }
+
+  function spitAcid(o) {
+    const p = G.player;
+    const sx = o.x - 16;
+    const sy = o.y + 8;
+    const tx = p.x;
+    const ty = p.y - 38;
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const flight = clamp(Math.abs(dx) / 300, 0.55, 1.05);
+    const grav = 620;
+    const vx = dx / flight;
+    const vy = (dy - 0.5 * grav * flight * flight) / flight;
+    addProjectile(sx, sy, vx, vy, false, { acid: true, grav });
+    burst(sx, sy, {
+      count: 6,
+      color: "#8bff9e",
+      speed: 140,
+      life: 0.35,
+      size: 2,
+      type: "spark",
+      gravity: 260,
     });
   }
 
@@ -1186,6 +1248,26 @@
 
   function patBatWave(x) {
     for (let i = 0; i < 3; i++) addBat(x + i * 88, GROUND - (112 + i * 36));
+  }
+
+  function patCharger(x) {
+    addCharger(x + 60);
+    if (chance(0.35)) addEmberArc(x, GROUND - 96, 4, true);
+  }
+
+  function patChargerSpike(x) {
+    addCharger(x + 120);
+    addSpike(x, 58);
+  }
+
+  function patSpitter(x) {
+    addSpitter(x + 40, GROUND - rand(112, 150));
+    if (chance(0.4)) addEmberArc(x + 20, GROUND - 70, 4, false);
+  }
+
+  function patSpitterBat(x) {
+    addSpitter(x + 30, GROUND - rand(118, 152));
+    addBat(x + 210, GROUND - rand(86, 118));
   }
 
   function patEmberRun(x) {
@@ -1320,6 +1402,22 @@
     p.runT += dt * (7 + G.speed / 55);
     p.flipT = Math.max(0, p.flipT - dt);
     p.invuln = Math.max(0, p.invuln - dt);
+
+    p.dustT -= dt;
+    if (p.onGround && p.dustT <= 0) {
+      p.dustT = clamp(0.2 - G.speed / 5200, 0.1, 0.2);
+      addParticle({
+        type: "dust",
+        x: p.x - rand(10, 18),
+        y: p.y - rand(0, 3),
+        vx: -rand(20, 70),
+        vy: -rand(8, 42),
+        life: rand(0.24, 0.42),
+        size: rand(1.5, 3),
+        color: "#7a7166",
+        gravity: 140,
+      });
+    }
   }
 
   function land(p, obj, surfaceY) {
@@ -1421,13 +1519,13 @@
       h: 94,
     };
     for (const o of G.objects) {
-      if (o.dead) continue;
-      if (o.kind !== "bat" && o.kind !== "slime") continue;
+      if (o.dead || !isEnemy(o)) continue;
       if (p.attackHits.has(o)) continue;
       const r = enemyRect(o);
       if (rectsOverlap(box, r)) {
         p.attackHits.add(o);
-        hitEnemy(o, o.kind === "slime" ? 65 : 75, "slash");
+        const base = o.kind === "charger" ? 115 : o.kind === "spitter" ? 105 : o.kind === "slime" ? 65 : 75;
+        hitEnemy(o, base, "slash");
       }
     }
     for (const pr of G.projectiles) {
@@ -1464,13 +1562,15 @@
   function reflectProjectile(pr) {
     const p = G.player;
     pr.reflected = true;
+    pr.grav = 0;
     const speed = Math.max(620, Math.abs(pr.vx) * 2.2);
     let best = null;
     let bestD = Infinity;
     for (const o of G.objects) {
-      if (o.dead || (o.kind !== "bat" && o.kind !== "slime")) continue;
+      if (o.dead || !isEnemy(o)) continue;
       if (o.x < p.x + 30) continue;
-      const d = (o.x - pr.x) * (o.x - pr.x) + (o.y - 20 - pr.y) * (o.y - 20 - pr.y);
+      const ay = enemyAimY(o);
+      const d = (o.x - pr.x) * (o.x - pr.x) + (ay - pr.y) * (ay - pr.y);
       if (d < bestD) {
         bestD = d;
         best = o;
@@ -1479,7 +1579,7 @@
     if (best) {
       const flight = Math.max(0.08, Math.abs(best.x - pr.x) / speed);
       const tx = best.x - G.speed * flight;
-      const ty = best.y - (best.kind === "bat" ? 0 : 20);
+      const ty = enemyAimY(best);
       const dx = tx - pr.x;
       const dy = ty - pr.y;
       const len = Math.hypot(dx, dy) || 1;
@@ -1518,14 +1618,21 @@
     o.dead = true;
     G.kills++;
     addCombo(1);
-    const color = o.kind === "bat" ? "#ff8a7a" : "#c7d3c0";
-    addScore(base, o.x, o.y - 22, color);
+    const palette =
+      o.kind === "bat"
+        ? { fx: "#ff8a7a", dust: "#2b2f36" }
+        : o.kind === "slime"
+          ? { fx: "#c7d3c0", dust: "#7d8781" }
+          : o.kind === "charger"
+            ? { fx: "#ffb066", dust: "#4a3830" }
+            : { fx: "#9bffb0", dust: "#2f4a36" };
+    addScore(base, o.x, o.y - 22, palette.fx);
     G.hitstop = Math.max(G.hitstop, 0.035);
     G.shake = Math.max(G.shake, 6);
     playSound("hitEnemy");
     burst(o.x, o.y - 6, {
       count: 14,
-      color: o.kind === "bat" ? "#2b2f36" : "#7d8781",
+      color: palette.dust,
       speed: 260,
       life: 0.5,
       size: 3,
@@ -1545,8 +1652,7 @@
     if (G.player.fury > 0) {
       ring(o.x, o.y - 6, "#ff8a3c", 26, 0.4);
       for (const other of G.objects) {
-        if (other === o || other.dead) continue;
-        if (other.kind !== "bat" && other.kind !== "slime") continue;
+        if (other === o || other.dead || !isEnemy(other)) continue;
         if (dist2(other.x, other.y, o.x, o.y) < 100 * 100) {
           hitEnemy(other, 40, "fury");
         }
@@ -1556,10 +1662,32 @@
 
   /* ---------------------------------------------------------- collisions */
 
+  function isEnemy(o) {
+    return o.kind === "bat" || o.kind === "slime" || o.kind === "charger" || o.kind === "spitter";
+  }
+
   function enemyRect(o) {
     if (o.kind === "bat") return { x: o.x - 21, y: o.y - 15, w: 42, h: 30 };
     if (o.kind === "slime") return { x: o.x - 18, y: o.y - 32, w: 36, h: 32 };
+    if (o.kind === "charger") return { x: o.x - 25, y: o.y - 38, w: 50, h: 38 };
+    if (o.kind === "spitter") return { x: o.x - 20, y: o.y - 21, w: 40, h: 42 };
     return { x: o.x, y: o.y, w: 10, h: 10 };
+  }
+
+  function enemyAimY(o) {
+    if (o.kind === "slime") return o.y - 20;
+    if (o.kind === "charger") return o.y - 20;
+    return o.y;
+  }
+
+  // Height of the drawn spike surface at world x (matches drawSpike's hash).
+  function spikeSurfaceY(o, x) {
+    const n = Math.max(2, Math.round(o.w / 19));
+    const step = o.w / n;
+    const i = clamp(Math.floor((x - o.x) / step), 0, n - 1);
+    const t = clamp((x - o.x - i * step) / step, 0, 1);
+    const h = o.h * (0.68 + hash(o.x * 0.03 + i) * 0.32);
+    return o.y + o.h - h * (1 - Math.abs(t * 2 - 1));
   }
 
   function heroRect(p) {
@@ -1580,12 +1708,22 @@
       if (o.kind === "platform" || o.kind === "ember" || o.kind === "perk") continue;
 
       if (o.kind === "spike") {
-        const r = { x: o.x + 4, y: o.y + 3, w: o.w - 8, h: o.h };
-        if (rectsOverlap(hr, r)) {
-          hurtPlayer();
-          return;
+        const left = Math.max(hr.x, o.x);
+        const right = Math.min(hr.x + hr.w, o.x + o.w);
+        if (right > left) {
+          const n = Math.max(2, Math.round(o.w / 19));
+          const step = o.w / n;
+          const bottom = hr.y + hr.h;
+          for (let i = 0; i < n; i++) {
+            const apexX = o.x + (i + 0.5) * step;
+            const sampleX = clamp(apexX, left, right);
+            if (bottom > spikeSurfaceY(o, sampleX) + 0.5) {
+              hurtPlayer();
+              return;
+            }
+          }
         }
-      } else if (o.kind === "slime" || o.kind === "bat") {
+      } else if (isEnemy(o)) {
         if (rectsOverlap(hr, enemyRect(o))) {
           hurtPlayer();
           return;
@@ -1729,6 +1867,7 @@
   function onLevelUp() {
     showBanner("СЛОЖНОСТЬ " + G.level, LEVEL_FLAVOR[Math.min(G.level, LEVEL_FLAVOR.length - 1)] || "лес злее");
     playSound("levelUp");
+    if (window.Sound) window.Sound.setIntensity(G.level);
     G.flash = 0.2;
     G.flashColor = "255,170,80";
     G.shake = Math.max(G.shake, 8);
@@ -1812,6 +1951,91 @@
         }
         if (!o.near && Math.abs(o.x - p.x) < 42) o.near = true;
         if (o.x < -90) o.dead = true;
+      } else if (o.kind === "charger") {
+        o.phase += dt * (o.state === "lunge" ? 16 : 8);
+        if (o.state === "run") {
+          o.x -= (speed * 0.9 + 30) * dt;
+          const gap = o.x - p.x;
+          if (gap < 430 && gap > 70) {
+            o.state = "tell";
+            o.timer = 0.46;
+            playSound("growl");
+          }
+        } else if (o.state === "tell") {
+          o.x -= speed * 0.45 * dt;
+          o.timer -= dt;
+          if (Math.random() < 0.4) {
+            addParticle({
+              type: "dust",
+              x: o.x + rand(-18, 18),
+              y: GROUND - rand(0, 4),
+              vx: -rand(30, 90),
+              vy: -rand(20, 80),
+              life: rand(0.25, 0.45),
+              size: rand(2, 4),
+              color: "#6b5a48",
+              gravity: 300,
+            });
+          }
+          if (o.timer <= 0) {
+            o.state = "lunge";
+            o.timer = 0.9;
+            G.shake = Math.max(G.shake, 4);
+            burst(o.x, GROUND - 10, {
+              count: 10,
+              color: "#8a6a4a",
+              speed: 180,
+              life: 0.4,
+              size: 3,
+              type: "dust",
+              gravity: 300,
+            });
+          }
+        } else {
+          o.x -= (speed + 250) * dt;
+          o.timer -= dt;
+          if (Math.random() < 0.55) {
+            addParticle({
+              type: "spark",
+              x: o.x + rand(10, 26),
+              y: o.y - rand(8, 30),
+              vx: rand(60, 160),
+              vy: rand(-30, 30),
+              life: 0.22,
+              size: rand(1.2, 2.2),
+              color: "#ff9a5c",
+              gravity: 0,
+            });
+          }
+          if (o.timer <= 0) o.state = "run";
+        }
+        o.y = GROUND + 2;
+        if (!o.passed && o.x < p.x - 36) {
+          o.passed = true;
+          if (o.near && p.invuln <= 0) nearMiss(o.x, o.y - 20);
+        }
+        if (!o.near && Math.abs(o.x - p.x) < 64) o.near = true;
+        if (o.x < -110) o.dead = true;
+      } else if (o.kind === "spitter") {
+        o.phase += dt;
+        o.x -= (speed + 14) * dt;
+        o.y = o.baseY + Math.sin(o.phase * 1.7 + o.seed) * 7;
+        if (o.x < W - 10 && o.x > p.x + 150) {
+          o.fireCd -= dt;
+          if (o.fireCd <= 0) {
+            o.fireCd = clamp(rand(2.6, 3.5) - G.level * 0.055, 1.5, 3.5);
+            if (G.projectiles.length < 10) {
+              spitAcid(o);
+              playSound("spit");
+            }
+          }
+        }
+        if (!o.passed && o.x < p.x - 34) {
+          o.passed = true;
+          if (o.near && p.invuln <= 0) nearMiss(o.x, o.y);
+        }
+        if (!o.near && Math.abs(o.x - p.x) < 46) o.near = true;
+        if (o.x < -90) o.dead = true;
       } else if (o.kind === "saw") {
         o.x -= (speed + 18) * dt;
         o.phase += dt;
@@ -1837,6 +2061,7 @@
     const p = G.player;
     for (const pr of G.projectiles) {
       if (pr.dead) continue;
+      if (pr.grav) pr.vy += pr.grav * dt;
       pr.x += pr.vx * dt;
       pr.y += pr.vy * dt;
       pr.life -= dt;
@@ -1851,7 +2076,7 @@
           vy: -pr.vy * 0.06,
           life: 0.28,
           size: pr.reflected ? 2.4 : 2,
-          color: pr.reflected ? "#5fe6ff" : "#ff6b5a",
+          color: pr.reflected ? "#5fe6ff" : pr.acid ? "#8bff9e" : "#ff6b5a",
           grav: 0,
           drag: 1,
         });
@@ -1864,8 +2089,7 @@
         }
       } else {
         for (const o of G.objects) {
-          if (o.dead) continue;
-          if (o.kind !== "bat" && o.kind !== "slime") continue;
+          if (o.dead || !isEnemy(o)) continue;
           const r = enemyRect(o);
           if (pr.x > r.x && pr.x < r.x + r.w && pr.y > r.y && pr.y < r.y + r.h) {
             pr.dead = true;
@@ -1874,6 +2098,20 @@
             break;
           }
         }
+      }
+
+      if (!pr.reflected && pr.acid && pr.y >= GROUND - 2) {
+        pr.dead = true;
+        burst(pr.x, GROUND, {
+          count: 8,
+          color: "#8bff9e",
+          speed: 150,
+          life: 0.4,
+          size: 2,
+          type: "spark",
+          gravity: 420,
+        });
+        ring(pr.x, GROUND - 2, "#8bff9e", 8, 0.3);
       }
 
       if (pr.life <= 0 || pr.x < -80 || pr.x > W + 260 || pr.y < -120 || pr.y > H + 80) {
@@ -2490,27 +2728,22 @@
   function drawBat(o) {
     if (!IMG.bat) return;
     const fw = 96;
-    const frame = Math.floor(G.time * 11 + o.seed) % 4;
+    const frame = Math.floor(G.time * 12 + o.seed) % 4;
     const s = 0.56;
     const drawSize = fw * s;
     ctx.save();
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = 0.16;
     ctx.fillStyle = "#040906";
     ctx.beginPath();
-    ctx.ellipse(o.x, GROUND + 2, 16, 3.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(o.x, GROUND + 2, 13, 3, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    ctx.drawImage(
-      IMG.bat,
-      frame * fw,
-      0,
-      fw,
-      fw,
-      Math.round(o.x - drawSize / 2),
-      Math.round(o.y - drawSize / 2),
-      drawSize,
-      drawSize
-    );
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(Math.cos(o.phase * 3.1 + o.seed) * 0.1);
+    ctx.scale(-1, 1);
+    ctx.drawImage(IMG.bat, frame * fw, 0, fw, fw, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+    ctx.restore();
     glow("red", o.x, o.y + 3, 33, 0.3);
     if (o.fireCd < 0.5 && G.level >= 3) glow("red", o.x, o.y, 44, 0.36);
   }
@@ -2521,25 +2754,212 @@
     const frame = Math.floor(o.phase) % 6;
     const s = 0.55;
     const drawSize = fw * s;
+    const breathe = Math.sin(o.phase * 0.55);
+    const sx = 1 - breathe * 0.045;
+    const sy = 1 + breathe * 0.06;
     ctx.save();
     ctx.globalAlpha = 0.25;
     ctx.fillStyle = "#040906";
     ctx.beginPath();
-    ctx.ellipse(o.x, GROUND + 2, 19, 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(o.x, GROUND + 2, 19 * sx, 4, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    ctx.drawImage(
-      IMG.slime,
-      frame * fw,
-      0,
-      fw,
-      fw,
-      Math.round(o.x - drawSize / 2),
-      Math.round(o.y - drawSize),
-      drawSize,
-      drawSize
-    );
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(-sx, sy);
+    ctx.drawImage(IMG.slime, frame * fw, 0, fw, fw, -drawSize / 2, -drawSize, drawSize, drawSize);
+    ctx.restore();
     glow("red", o.x, o.y - 19, 28, 0.28);
+  }
+
+  function drawCharger(o) {
+    const bob = Math.sin(o.phase * 0.8) * 1.1;
+    const crouch = o.state === "tell" ? 4 : 0;
+    const stretch = o.state === "lunge" ? 1.12 : 1;
+    const sink = o.y + bob * 0.3 + crouch;
+
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = "#030805";
+    ctx.beginPath();
+    ctx.ellipse(o.x, GROUND + 3, 26, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // dark halo keeps the silhouette readable against the green forest
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = "#030805";
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y - 20, 30, 21, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(o.x, sink);
+    ctx.scale(stretch, 2 - stretch);
+
+    // legs
+    for (let i = 0; i < 4; i++) {
+      const swing = Math.sin(o.phase * 2 + i * 1.9) * 4;
+      const lx = -16 + i * 10;
+      ctx.fillStyle = i % 2 ? "#241c17" : "#2e231c";
+      ctx.fillRect(lx + swing * 0.4, -14, 4, 14 + Math.max(0, swing));
+      ctx.fillStyle = "#17110e";
+      ctx.fillRect(lx + swing * 0.4, 0, 5, 2);
+    }
+
+    // tail
+    ctx.strokeStyle = "#2a201a";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(20, -24);
+    ctx.quadraticCurveTo(33, -28 + Math.sin(o.phase * 2) * 3, 38, -34);
+    ctx.stroke();
+
+    // body
+    ctx.fillStyle = "#33251d";
+    ctx.beginPath();
+    ctx.ellipse(0, -21, 25, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#453328";
+    ctx.beginPath();
+    ctx.ellipse(-2, -25, 20, 9, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // back ridge
+    ctx.fillStyle = "#201711";
+    for (let i = 0; i < 4; i++) {
+      const bx = 4 + i * 6;
+      const bh = 7 - i;
+      ctx.beginPath();
+      ctx.moveTo(bx, -31);
+      ctx.lineTo(bx + 3, -31 - bh);
+      ctx.lineTo(bx + 6, -31);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // head and snout (faces left, toward the hero)
+    ctx.fillStyle = "#3b2a21";
+    ctx.beginPath();
+    ctx.ellipse(-24, -26, 13, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2b1d17";
+    ctx.fillRect(-37, -24, 13, 9);
+    ctx.fillStyle = "#4d392c";
+    ctx.fillRect(-36, -27, 9, 4);
+
+    // tusk
+    ctx.fillStyle = "#e8dfc8";
+    ctx.beginPath();
+    ctx.moveTo(-33, -15);
+    ctx.lineTo(-29, -22);
+    ctx.lineTo(-27, -15);
+    ctx.closePath();
+    ctx.fill();
+
+    // ear
+    ctx.fillStyle = "#241914";
+    ctx.beginPath();
+    ctx.moveTo(-20, -35);
+    ctx.lineTo(-14, -42);
+    ctx.lineTo(-12, -32);
+    ctx.closePath();
+    ctx.fill();
+
+    // eye
+    const tell = o.state === "tell" || o.state === "lunge";
+    ctx.fillStyle = tell ? "#ff5a3c" : "#e0563a";
+    ctx.fillRect(-29, -29, 5, 3);
+    ctx.fillStyle = "#ffd0a0";
+    ctx.fillRect(-29, -29, 2, 1);
+    ctx.restore();
+
+    glow("red", o.x - 8, o.y - 26, tell ? 56 : 38, tell ? 0.42 : 0.22);
+  }
+
+  function drawSpitter(o) {
+    const pulse = 1 + Math.sin(o.phase * 2.4) * 0.035;
+    const charge = o.fireCd < 0.45 ? clamp(1 - o.fireCd / 0.45, 0, 1) : 0;
+    glow("green", o.x, o.y, 52 + charge * 30, 0.22 + charge * 0.28);
+
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = "#030805";
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, 25, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // tendrils
+    ctx.strokeStyle = "#2c5a3a";
+    ctx.lineWidth = 2;
+    for (let i = -1; i <= 1; i++) {
+      const sway = Math.sin(o.phase * 2.2 + i * 1.4) * 3;
+      ctx.beginPath();
+      ctx.moveTo(o.x + i * 8, o.y + 14);
+      ctx.quadraticCurveTo(o.x + i * 9 + sway, o.y + 24, o.x + i * 7 - sway, o.y + 32);
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(pulse, 2 - pulse);
+    ctx.scale(-1, 1);
+
+    // body sac
+    ctx.fillStyle = "#1d3327";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 18, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#294a36";
+    ctx.beginPath();
+    ctx.ellipse(4, -3, 12, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // leaves
+    ctx.fillStyle = "#3f724d";
+    for (let i = 0; i < 3; i++) {
+      const a = -0.6 + i * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(5, -18);
+      ctx.lineTo(5 + Math.cos(a) * 12, -18 - Math.sin(a) * 12);
+      ctx.lineTo(11, -16);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // eye looks toward the hero (left)
+    ctx.fillStyle = "#d9ffe2";
+    ctx.beginPath();
+    ctx.ellipse(-3, -5, 7, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0d1a10";
+    ctx.beginPath();
+    ctx.ellipse(-6, -5, 3, 3.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#8bff9e";
+    ctx.fillRect(-7, -7, 1.5, 1.5);
+
+    // mouth opens when it is about to spit
+    ctx.fillStyle = "#102016";
+    ctx.beginPath();
+    ctx.ellipse(-13, 7, 4 + charge * 3, 3 + charge * 4, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    if (charge > 0.2) {
+      ctx.fillStyle = "rgba(139,255,158," + (0.5 + charge * 0.5) + ")";
+      ctx.beginPath();
+      ctx.arc(-13, 7, 1.5 + charge * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // belly glow
+    ctx.fillStyle = "rgba(139,255,158," + (0.06 + charge * 0.12) + ")";
+    ctx.beginPath();
+    ctx.ellipse(2, 6, 10, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   function drawEmber(o) {
@@ -2600,17 +3020,29 @@
   }
 
   function drawProjectile(pr) {
-    const key = pr.reflected ? "cyan" : "red";
-    glow(key, pr.x, pr.y, pr.reflected ? 44 : 38, 0.55);
-    ctx.fillStyle = pr.reflected ? "#bff6ff" : "#1c1112";
+    const key = pr.reflected ? "cyan" : pr.acid ? "green" : "red";
+    const core = pr.reflected ? "#ffffff" : pr.acid ? "#d6ffdf" : "#ff5d4d";
+    glow(key, pr.x, pr.y, pr.reflected ? 44 : pr.acid ? 42 : 38, 0.55);
+    ctx.fillStyle = pr.reflected ? "#bff6ff" : pr.acid ? "#173d24" : "#1c1112";
     ctx.beginPath();
     ctx.arc(pr.x, pr.y, pr.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = pr.reflected ? "#ffffff" : "#ff5d4d";
+    ctx.fillStyle = core;
     ctx.beginPath();
-    ctx.arc(pr.x + (pr.reflected ? 1 : -1), pr.y, pr.r * 0.52, 0, Math.PI * 2);
+    ctx.arc(pr.x + (pr.reflected ? 1 : -1), pr.y, pr.r * (pr.acid ? 0.42 : 0.52), 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = pr.reflected ? "rgba(255,209,102,0.8)" : "rgba(255,120,90,0.35)";
+    if (pr.acid) {
+      ctx.fillStyle = "rgba(139,255,158,0.75)";
+      ctx.beginPath();
+      ctx.arc(pr.x + pr.r * 0.4, pr.y + pr.r * 0.5, 2, 0, Math.PI * 2);
+      ctx.arc(pr.x - pr.r * 0.3, pr.y + pr.r * 0.8, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = pr.reflected
+      ? "rgba(255,209,102,0.8)"
+      : pr.acid
+        ? "rgba(139,255,158,0.4)"
+        : "rgba(255,120,90,0.35)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(pr.x, pr.y, pr.r + 3 + Math.sin(G.time * 12 + pr.phase) * 1.5, 0, Math.PI * 2);
@@ -2859,6 +3291,8 @@
       else if (o.kind === "saw") drawSaw(o);
       else if (o.kind === "slime") drawSlime(o);
       else if (o.kind === "bat") drawBat(o);
+      else if (o.kind === "charger") drawCharger(o);
+      else if (o.kind === "spitter") drawSpitter(o);
     }
   }
 
@@ -3081,6 +3515,10 @@
         platform: patPlatform,
         orb: patOrb,
         batwave: patBatWave,
+        charger: patCharger,
+        chargerspike: patChargerSpike,
+        spitter: patSpitter,
+        spitterbat: patSpitterBat,
       };
       if (map[name]) map[name](W + 100);
     },
